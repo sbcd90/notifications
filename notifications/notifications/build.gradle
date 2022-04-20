@@ -182,6 +182,9 @@ Zip bundle = (Zip) project.getTasks().getByName("bundlePlugin");
 integTest.dependsOn(bundle)
 integTest.getClusters().forEach{c -> c.plugin(project.getObjects().fileProperty().value(bundle.getArchiveFile()))}
 
+String notificationsCoreFilePath = "src/test/resources/notifications-core"
+String notificationsCorePlugin = "opensearch-notifications-core-" + plugin_no_snapshot + ".zip"
+String notificationsCoreRemoteFile = "https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/" + opensearch_no_snapshot + "/latest/linux/x64/tar/builds/opensearch/plugins/" + notificationsCorePlugin
 testClusters.integTest {
     testDistribution = 'INTEG_TEST'
     // need to install notification-core first, need to assemble notification-core first
@@ -191,7 +194,17 @@ testClusters.integTest {
             return new RegularFile() {
                 @Override
                 File getAsFile() {
-                    return fileTree("src/test/resources/notifications-core").getSingleFile()
+                    File dir = new File(rootDir.path + "/notifications/" + notificationsCoreFilePath)
+
+                    if (!dir.exists()) {
+                        dir.mkdirs()
+                    }
+
+                    File f = new File(dir, notificationsCorePlugin)
+                    if (!f.exists()) {
+                        new URL(notificationsCoreRemoteFile).withInputStream{ ins -> f.withOutputStream{ it << ins }}
+                    }
+                    return fileTree(notificationsCoreFilePath).getSingleFile()
                 }
             }
         }
