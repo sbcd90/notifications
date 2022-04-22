@@ -6,6 +6,7 @@
 import org.opensearch.gradle.test.RestIntegTestTask
 
 import java.util.concurrent.Callable
+import java.util.function.Consumer
 
 plugins {
     id 'nebula.ospackage' version "8.5.4"
@@ -136,6 +137,12 @@ test {
 
 File repo = file("$buildDir/testclusters/repo")
 def _numNodes = findProperty('numNodes') as Integer ?: 1
+String notificationsCoreFilePath = "src/test/resources/notifications-core"
+/*task copy(type: Copy) {
+    from '../core/build/distributions'
+    into notificationsCoreFilePath
+}
+tasks.getByPath(":${rootProject.name}-core:assemble").dependsOn(tasks.named("copy"))*/
 
 task integTest(type: RestIntegTestTask) {
     description = "Run tests against a cluster that has security enabled"
@@ -156,12 +163,14 @@ integTest {
     systemProperty "https", System.getProperty("https")
     systemProperty "user", System.getProperty("user")
     systemProperty "password", System.getProperty("password")
+//    Runtime.getRuntime().exec("./gradlew :opensearch-notifications-core:assemble")
     // Tell the test JVM if the cluster JVM is running under a debugger so that tests can use longer timeouts for
     // requests. The 'doFirst' delays reading the debug setting on the cluster till execution time.
     doFirst {
         // Tell the test JVM if the cluster JVM is running under a debugger so that tests can
         // use longer timeouts for requests.
         def isDebuggingCluster = getDebug() || System.getProperty("test.debug") != null
+//        from tasks.getByPath(":${rootProject.name}-core:assemble").outputs into notificationsCoreFilePath
         systemProperty 'cluster.debug', isDebuggingCluster
         // Set number of nodes system property to be used in tests
         systemProperty 'cluster.number_of_nodes', "${_numNodes}"
@@ -182,50 +191,47 @@ Zip bundle = (Zip) project.getTasks().getByName("bundlePlugin");
 integTest.dependsOn(bundle)
 integTest.getClusters().forEach{c -> c.plugin(project.getObjects().fileProperty().value(bundle.getArchiveFile()))}
 
-String notificationsCoreFilePath = "src/test/resources/notifications-core"
-String notificationsCorePlugin = "opensearch-notifications-core-" + plugin_no_snapshot + ".zip"
-String notificationsCoreRemoteFile = "https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/" + opensearch_no_snapshot + "/latest/linux/x64/tar/builds/opensearch/plugins/" + notificationsCorePlugin
-testClusters.integTest {
-    testDistribution = 'INTEG_TEST'
-    // need to install notification-core first, need to assemble notification-core first
-    plugin(provider(new Callable<RegularFile>(){
-        @Override
-        RegularFile call() throws Exception {
-            return new RegularFile() {
-                @Override
-                File getAsFile() {
-                    File dir = new File(rootDir.path + "/notifications/" + notificationsCoreFilePath)
+testClusters {
+    integTest {
+        testDistribution = 'INTEG_TEST'
 
-                    if (!dir.exists()) {
-                        dir.mkdirs()
+        // need to install notification-core first, need to assemble notification-core first
+        plugin(provider(new Callable<RegularFile>(){
+            @Override
+            RegularFile call() throws Exception {
+                return new RegularFile() {
+                    @Override
+                    File getAsFile() {
+                        return fileTree(notificationsCoreFilePath).getSingleFile()
                     }
-
-                    File f = new File(dir, notificationsCorePlugin)
-                    if (!f.exists()) {
-                        new URL(notificationsCoreRemoteFile).withInputStream{ ins -> f.withOutputStream{ it << ins }}
-                    }
-                    return fileTree(notificationsCoreFilePath).getSingleFile()
                 }
             }
+        }))
+        // Cluster shrink exception thrown if we try to set numberOfNodes to 1, so only apply if > 1
+        if (_numNodes > 1) numberOfNodes = _numNodes
+        // When running integration tests it doesn't forward the --debug-jvm to the cluster anymore
+        // i.e. we have to use a custom property to flag when we want to debug OpenSearch JVM
+        // since we also support multi node integration tests we increase debugPort per node
+        if (System.getProperty("cluster.debug") != null) {
+            def debugPort = 5005
+            nodes.forEach { node ->
+                node.jvmArgs("-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=*:${debugPort}")
+                debugPort += 1
+            }
         }
-    }))
-    // Cluster shrink exception thrown if we try to set numberOfNodes to 1, so only apply if > 1
-    if (_numNodes > 1) numberOfNodes = _numNodes
-    // When running integration tests it doesn't forward the --debug-jvm to the cluster anymore
-    // i.e. we have to use a custom property to flag when we want to debug OpenSearch JVM
-    // since we also support multi node integration tests we increase debugPort per node
-    if (System.getProperty("cluster.debug") != null) {
-        def debugPort = 5005
-        nodes.forEach { node ->
-            node.jvmArgs("-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=*:${debugPort}")
-            debugPort += 1
-        }
+        setting 'path.repo', repo.absolutePath
     }
-    setting 'path.repo', repo.absolutePath
 }
+
+String notificationsCorePlugin = "opensearch-notifications-core-" + plugin_no_snapshot + ".zip"
+String notificationsCoreRemoteFile = "https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/" + opensearch_no_snapshot + "/latest/linux/x64/tar/builds/opensearch/plugins/" + notificationsCorePlugin
+//testClusters.
 
 run {
     doFirst {
+        exec {
+            tasks.getByPath(":${rootProject.name}-core:assemble")
+        }
         // There seems to be an issue when running multi node run or integ tasks with unicast_hosts
         // not being written, the waitForAllConditions ensures it's written
         getClusters().forEach { cluster ->

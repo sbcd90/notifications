@@ -1,3 +1,5 @@
+import java.util.function.Consumer
+
 /*
  * Copyright OpenSearch Contributors
  * SPDX-License-Identifier: Apache-2.0
@@ -96,6 +98,16 @@ task ktlintFormat(type: JavaExec, group: "formatting") {
     classpath = configurations.ktlint
     args "-F", "notifications/**/*.kt", "core/**/*.kt", "core-spi/**/*.kt"
 }
+
+task preBuild {
+    println "do it before build"
+    if (gradle.startParameter.taskNames.contains("clean")) {
+
+    } else {
+        Runtime.getRuntime().exec("./gradlew :opensearch-notifications-core:assemble")
+    }
+}
+tasks.getByPath('build').dependsOn(tasks.named('preBuild'))
 
 detekt {
     config = files("detekt.yml")

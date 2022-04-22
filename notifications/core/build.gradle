@@ -139,6 +139,12 @@ configurations {
         exclude group: 'org.elasticsearch', module: 'securemock' // resolve jarhell with mockito
     }
 }
+String notificationsCoreFilePath = "../notifications/src/test/resources/notifications-core"
+task copy(type: Copy) {
+    from 'build/distributions/opensearch-notifications-core-2.0.0.0-rc1-SNAPSHOT.zip'
+    into notificationsCoreFilePath
+}
+tasks.getByPath('assemble').dependsOn(tasks.named('copy'))
 
 // This is afterEvaluate because the bundlePlugin ZIP task is updated afterEvaluate and changes the ZIP name to match the plugin name
 afterEvaluate {
